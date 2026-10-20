@@ -2,16 +2,16 @@ import SwiftUI
 import SwiftData
 
 struct WardrobeView: View {
-    @Query(sort: \Garment.createdAt, order: .reverse) private var savedGarments: [Garment]
+    @Query(sort: \Garment.createdAt, order: .reverse)
+    private var savedGarments: [Garment]
+    
     @State private var viewModel = WardrobeViewModel()
     @State private var selectedGarment: Garment?
     @State private var showCapture = false
 
-    private var garments: [Garment] {
-        savedGarments
+    private var visibleGarments: [Garment] {
+        viewModel.filtered(savedGarments)
     }
-    
-    private var visibleGarments: [Garment] { viewModel.filtered(garments) }
     private var hangables: [Garment] { visibleGarments.filter { [.tops, .dresses, .outerwear].contains($0.category) } }
     private var foldables: [Garment] { visibleGarments.filter { $0.category == .bottoms } }
     private var footwear: [Garment] { visibleGarments.filter { $0.category == .shoes } }
@@ -119,7 +119,7 @@ struct WardrobeView: View {
     }
 
     private var selectedGarmentBinding: Binding<Garment?> {
-        Binding(get: { garments.first { $0.id == viewModel.selectedGarmentID } }, set: { viewModel.selectedGarmentID = $0?.id })
+        Binding(get: { savedGarments.first { $0.id == viewModel.selectedGarmentID } }, set: { viewModel.selectedGarmentID = $0?.id })
     }
 
     private var header: some View {
@@ -145,11 +145,11 @@ struct WardrobeView: View {
 
     private var summaryStrip: some View {
         HStack(spacing: 0) {
-            summaryMetric(value: "\(garments.count)", label: "PIECES", symbol: "square.grid.2x2")
+            summaryMetric(value: "\(savedGarments.count)", label: "PIECES", symbol: "square.grid.2x2")
             Divider().frame(height: 36)
-            summaryMetric(value: "\(garments.reduce(0) { $0 + $1.wearCount })", label: "TOTAL WEARS", symbol: "arrow.clockwise")
+            summaryMetric(value: "\(savedGarments.reduce(0) { $0 + $1.wearCount })", label: "TOTAL WEARS", symbol: "arrow.clockwise")
             Divider().frame(height: 36)
-            summaryMetric(value: "\(garments.filter { $0.wearCount == 0 }.count)", label: "UNWORN", symbol: "sparkles")
+            summaryMetric(value: "\(savedGarments.filter { $0.wearCount == 0 }.count)", label: "UNWORN", symbol: "sparkles")
         }
         .padding(.vertical, 13).background(Color.wardrobeChip, in: RoundedRectangle(cornerRadius: 18)).padding(.horizontal, 20)
     }

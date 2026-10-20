@@ -25,6 +25,7 @@ final class Garment {
     var lastWornDate: Date?
     var createdAt: Date
     var tags: [String]
+    var isArchived: Bool
 
     init(
         id: UUID = UUID(),
@@ -36,7 +37,8 @@ final class Garment {
         wearCount: Int = 0,
         lastWornDate: Date? = nil,
         createdAt: Date = .now,
-        tags: [String] = []
+        tags: [String] = [],
+        isArchived: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -48,6 +50,7 @@ final class Garment {
         self.lastWornDate = lastWornDate
         self.createdAt = createdAt
         self.tags = tags
+        self.isArchived = isArchived
     }
 
     var category: GarmentCategory {

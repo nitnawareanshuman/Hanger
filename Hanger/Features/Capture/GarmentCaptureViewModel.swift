@@ -110,4 +110,16 @@ final class GarmentCaptureViewModel {
             errorMessage = "Couldn't save this garment. \(error.localizedDescription)"
         }
     }
+    
+    func autoCategorize(_ image: UIImage) async {
+        do {
+            let result = try await OpenAIWardrobeService.shared.categorize(image: image)
+            garmentName = result.name
+            selectedCategory = result.appCategory
+            selectedSeason = result.appSeason
+            // If you add a styleTags property to the view model, assign result.style_tags here.
+        } catch {
+            errorMessage = "Auto-categorization unavailable. You can edit this garment manually."
+        }
+    }
 }
