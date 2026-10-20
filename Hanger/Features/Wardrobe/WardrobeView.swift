@@ -4,6 +4,8 @@ import SwiftData
 struct WardrobeView: View {
     @Query(sort: \Garment.createdAt, order: .reverse) private var savedGarments: [Garment]
     @State private var viewModel = WardrobeViewModel()
+    @State private var selectedGarment: Garment?
+    @State private var showCapture = false
 
     private var garments: [Garment] {
         #if DEBUG
@@ -32,15 +34,34 @@ struct WardrobeView: View {
                             Text("\(visibleGarments.count) pieces, thoughtfully kept").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            viewModel.showCapturePlaceholder = true
+                            showCapture = true
                         } label: {
-                            Image(systemName: "camera.fill").font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white).frame(width: 42, height: 42)
-                                .background(Color.wardrobeInk, in: RoundedRectangle(cornerRadius: 14))
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(Color(red: 0.91, green: 0.48, blue: 0.20))
+                                .frame(width: 52, height: 52)
+                                .background(
+                                    Color(red: 0.16, green: 0.16, blue: 0.17),
+                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                                }
+                                .contentShape(RoundedRectangle(cornerRadius: 16))
                         }
-                        .accessibilityLabel("Capture garment")
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add a garment")
+                        .accessibilityHint("Opens garment capture")
+                        .sheet(isPresented: $showCapture) {
+                            GarmentCaptureView()
+                                .presentationDetents([.medium, .large])
+                                .presentationDragIndicator(.visible)
+                        }
+
                     }
                     .padding(.horizontal, 20)
                     WardrobeCabinet {
@@ -66,12 +87,11 @@ struct WardrobeView: View {
                 .padding(.top, 10).padding(.bottom, 28)
             }
         }
-        .sheet(item: selectedGarmentBinding) { garment in
-            GarmentDetailView(garment: garment) { viewModel.markAsWorn(garment) }
-                .background(Color.wardrobeBackground)
-        }
-        .sheet(isPresented: $viewModel.showCapturePlaceholder) {
-            CaptureComingSoonView().presentationDetents([.medium]).presentationDragIndicator(.visible)
+        .sheet(item: $selectedGarment) { garment in
+            GarmentDetailView(garment: garment) {
+                viewModel.markAsWorn(garment)
+            }
+            .background(Color.wardrobeBackground)
         }
     }
 
@@ -122,7 +142,9 @@ struct WardrobeView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func select(_ garment: Garment) { viewModel.select(garment) }
+    private func select(_ garment: Garment) {
+        selectedGarment = garment
+    }
 }
 
 private struct WardrobeCabinet<Content: View>: View {
