@@ -161,100 +161,207 @@ struct GarmentCaptureView: View {
             .foregroundStyle(.white)
         }
     }
+    
+    
+    private var categoryOptions: some View {
+        ForEach(GarmentCategory.allCases) { category in
+            Text(category.title)
+                .tag(category)
+        }
+    }
+
+    private var seasonOptions: some View {
+        ForEach(Season.allCases) { season in
+            Text(season.title)
+                .tag(season)
+        }
+    }
+    
+    
+    @ViewBuilder
+    private var errorMessageView: some View {
+        if let message = viewModel.errorMessage {
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(Color.orange)
+                .frame(
+                    maxWidth: .infinity,
+                    alignment: .leading
+                )
+        }
+    }
+    
+    
+    private var imagePreview: some View {
+        ZStack {
+            CaptureCheckerboard()
+
+            if let image = viewModel.processedImage
+                ?? viewModel.capturedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(12)
+            }
+
+            if viewModel.isProcessing {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.white)
+
+                    Text("Removing background…")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(18)
+                .background(
+                    Color.black.opacity(0.75),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+            }
+        }
+    }
+    
+    private var garmentForm: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            garmentNameField
+            categoryPicker
+            seasonPicker
+            dominantColorView
+            reviewActions
+        }
+    }
+
+    private var garmentNameField: some View {
+        TextField("Garment name", text: $viewModel.garmentName)
+            .textFieldStyle(.roundedBorder)
+    }
+
+    private var categoryPicker: some View {
+        Picker(
+            "Category",
+            selection: $viewModel.selectedCategory
+        ) {
+            ForEach(GarmentCategory.allCases) { category in
+                categoryOption(category)
+            }
+        }
+        .tint(.white)
+    }
+
+    private func categoryOption(
+        _ category: GarmentCategory
+    ) -> some View {
+        Text(category.title)
+            .tag(category)
+    }
+
+    private var seasonPicker: some View {
+        Picker(
+            "Season",
+            selection: $viewModel.selectedSeason
+        ) {
+            ForEach(Season.allCases) { season in
+                seasonOption(season)
+            }
+        }
+        .tint(.white)
+    }
+
+    private func seasonOption(_ season: Season) -> some View {
+        Text(season.title)
+            .tag(season)
+    }
+
+    private var dominantColorView: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Color(hex: viewModel.dominantColorHex))
+                .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Dominant color")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+
+                Text(
+                    "\(viewModel.dominantColorName.capitalized) · \(viewModel.dominantColorHex)"
+                )
+                .font(.subheadline.monospaced().bold())
+                .foregroundStyle(.white)
+            }
+
+            Spacer()
+        }
+    }
+    
+    
+    private var reviewActions: some View {
+        HStack(spacing: 12) {
+            Button {
+                viewModel.retake()
+                Task {
+                    await camera.configureAndStart()
+                }
+            } label: {
+                Label("Retake", systemImage: "arrow.counterclockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .foregroundStyle(Color.wardrobeAccent)
+                    .background(
+                        Color.white.opacity(0.10),
+                        in: Capsule()
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                viewModel.save(context: modelContext)
+
+                if viewModel.didSave {
+                    camera.stop()
+                    dismiss()
+                }
+            } label: {
+                Label(
+                    "Save garment",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.system(size: 16, weight: .bold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .foregroundStyle(.white)
+                .background(
+                    Color.wardrobeAccent,
+                    in: Capsule()
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isProcessing)
+            .opacity(viewModel.isProcessing ? 0.55 : 1)
+        }
+    }
+
 
     private var review: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ZStack {
-                    CaptureCheckerboard()
-                    if let image = viewModel.processedImage ?? viewModel.capturedImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(12)
-                    }
-                    if viewModel.isProcessing {
-                        VStack(spacing: 10) {
-                            ProgressView().tint(.white)
-                            Text("Removing background…").font(.subheadline.weight(.semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(18)
-                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 16))
-                    }
-                }
-                .frame(height: 330)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+                imagePreview
+                    .frame(height: 330)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: 20)
+                    )
 
-                if let message = viewModel.errorMessage {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    TextField("Garment name", text: $viewModel.garmentName)
-                        .textFieldStyle(.roundedBorder)
-
-                    Picker("Category", selection: $viewModel.selectedCategory) {
-                        ForEach(GarmentCategory.allCases) { category in
-                            Text(category.title).tag(category)
-                        }
-                    }
-                    .tint(.white)
-
-                    Picker("Season", selection: $viewModel.selectedSeason) {
-                        ForEach(Season.allCases) { season in
-                            Text(season.title).tag(season)
-                        }
-                    }
-                    .tint(.white)
-
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Color(hex: viewModel.dominantColorHex))
-                            .frame(width: 30, height: 30)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Dominant color")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.65))
-                            Text("\(viewModel.dominantColorName.capitalized) · \(viewModel.dominantColorHex)")
-                                .font(.subheadline.monospaced().bold())
-                        }
-                        Spacer()
-                    }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            viewModel.retake()
-                            Task { await camera.configureAndStart() }
-                        } label: {
-                            Label("Retake", systemImage: "arrow.counterclockwise")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            viewModel.save(context: modelContext)
-                            if viewModel.didSave {
-                                camera.stop()
-                                dismiss()
-                            }
-                        } label: {
-                            Label("Save garment", systemImage: "checkmark.circle.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(Color.wardrobeAccent, in: RoundedRectangle(cornerRadius: 14))
-                                .foregroundStyle(.white)
-                        }
-                        .disabled(viewModel.isProcessing)
-                    }
-                }
-                .padding(16)
-                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                errorMessageView
+                
+                garmentForm
+                
+                    .padding(16)
+                    .background(
+                        Color.white.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: 18)
+                    )
             }
             .padding(16)
         }

@@ -16,16 +16,22 @@ final class GarmentCaptureViewModel {
     var isProcessing = false
     var errorMessage: String?
     var didSave = false
+    var hasTransparentBackground = false
+
+    var previewImage: UIImage? {
+        processedImage ?? capturedImage
+    }
 
     private let processor = GarmentImageProcessor()
     private var processingTask: Task<Void, Never>?
 
     func handleCapture(_ image: UIImage) {
-        processingTask?.cancel()
         capturedImage = image
         processedImage = nil
+        hasTransparentBackground = false
         errorMessage = nil
         didSave = false
+        isProcessing = true
 
         processingTask = Task {
             isProcessing = true
@@ -37,19 +43,26 @@ final class GarmentCaptureViewModel {
                 processedImage = result.image
                 dominantColorHex = result.dominantColorHex
                 dominantColorName = result.dominantColorName
+                hasTransparentBackground = true
+                errorMessage = nil
                 if garmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     garmentName = "New garment"
                 }
             } catch is CancellationError {
                 return
             } catch {
-                // Keep the original as a recovery path if Vision cannot segment this image.
-                processedImage = image
+                processedImage = nil
+                hasTransparentBackground = false
+
                 if let color = processor.dominantColor(in: image) {
                     dominantColorHex = color.hex
                     dominantColorName = color.name
                 }
-                errorMessage = "\(error.localizedDescription) You can still save the original photo."
+
+                errorMessage = """
+                Background removal failed: \(error.localizedDescription)
+                You can still save the original photo, or retake it against a plain background.
+                """
             }
         }
     }

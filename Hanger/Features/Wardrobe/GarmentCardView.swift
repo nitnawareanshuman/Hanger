@@ -8,18 +8,27 @@ struct GarmentCardView: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .topTrailing) {
-                    GarmentIllustration(garment: garment)
-                        .frame(height: isCompact ? 112 : 142)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(hex: garment.colorHex).opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    Circle()
-                        .fill(Color(hex: garment.colorHex))
-                        .frame(width: 12, height: 12)
-                        .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
-                        .padding(9)
+                Group {
+                    if let image = GarmentImageStore.load(
+                        filename: garment.imageFilename
+                    ) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(8)
+                    } else {
+                        GarmentIllustration(garment: garment)
+                    }
                 }
+                .frame(height: isCompact ? 112 : 142)
+                .frame(maxWidth: .infinity)
+                .background(Color(hex: garment.colorHex).opacity(0.12))
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: 15,
+                        style: .continuous
+                    )
+                )
                 VStack(alignment: .leading, spacing: 3) {
                     Text(garment.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     Text("\(garment.wearCount) wears")

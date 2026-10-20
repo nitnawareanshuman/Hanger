@@ -8,12 +8,9 @@ struct WardrobeView: View {
     @State private var showCapture = false
 
     private var garments: [Garment] {
-        #if DEBUG
-        return savedGarments.isEmpty ? WardrobeSampleData.garments : savedGarments
-        #else
-        return savedGarments
-        #endif
+        savedGarments
     }
+    
     private var visibleGarments: [Garment] { viewModel.filtered(garments) }
     private var hangables: [Garment] { visibleGarments.filter { [.tops, .dresses, .outerwear].contains($0.category) } }
     private var foldables: [Garment] { visibleGarments.filter { $0.category == .bottoms } }
@@ -64,16 +61,42 @@ struct WardrobeView: View {
 
                     }
                     .padding(.horizontal, 20)
-                    WardrobeCabinet {
-                        VStack(spacing: 14) {
-                            HangingRailSection(garments: hangables, onSelect: select)
-                            WardrobeShelfView(title: "Folded essentials", subtitle: "Shelf 02", garments: foldables, compact: true, onSelect: select)
-                            WardrobeShelfView(title: "Footwear", subtitle: "Shelf 03", garments: footwear, compact: true, onSelect: select)
-                            DrawerSection(garments: accessories, onSelect: select)
+                    if visibleGarments.isEmpty {
+                        EmptyWardrobeView()
+                            .padding(.horizontal, 20)
+                    } else {
+                        WardrobeCabinet {
+                            VStack(spacing: 14) {
+                                HangingRailSection(
+                                    garments: hangables,
+                                    onSelect: select
+                                )
+
+                                WardrobeShelfView(
+                                    title: "Folded essentials",
+                                    subtitle: "Shelf 02",
+                                    garments: foldables,
+                                    compact: true,
+                                    onSelect: select
+                                )
+
+                                WardrobeShelfView(
+                                    title: "Footwear",
+                                    subtitle: "Shelf 03",
+                                    garments: footwear,
+                                    compact: true,
+                                    onSelect: select
+                                )
+
+                                DrawerSection(
+                                    garments: accessories,
+                                    onSelect: select
+                                )
+                            }
+                            .padding(14)
                         }
-                        .padding(14)
+                        .padding(.horizontal, 14)
                     }
-                    .padding(.horizontal, 14)
                     HStack {
                         Image(systemName: "sparkles").foregroundStyle(Color.wardrobeAccent)
                         VStack(alignment: .leading, spacing: 3) {
