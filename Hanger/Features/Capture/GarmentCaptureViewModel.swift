@@ -18,14 +18,13 @@ final class GarmentCaptureViewModel {
     var didSave = false
     var hasTransparentBackground = false
 
-    var previewImage: UIImage? {
-        processedImage ?? capturedImage
-    }
+    var previewImage: UIImage? { processedImage ?? capturedImage }
 
     private let processor = GarmentImageProcessor()
     private var processingTask: Task<Void, Never>?
 
     func handleCapture(_ image: UIImage) {
+        processingTask?.cancel()
         capturedImage = image
         processedImage = nil
         hasTransparentBackground = false
@@ -33,10 +32,18 @@ final class GarmentCaptureViewModel {
         didSave = false
         isProcessing = true
 
-        processingTask = Task {
-            isProcessing = true
-            defer { isProcessing = false }
+        // Calculate a useful color immediately, so the review screen is never left
+        // showing a stale default while segmentation is in progress.
+        if let color = processor.dominantColor(in: image) {
+            dominantColorHex = color.hex
+            dominantColorName = color.name
+        }
+        if garmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            garmentName = "New garment"
+        }
 
+        processingTask = Task {
+            defer { isProcessing = false }
             do {
                 let result = try await processor.process(image)
                 try Task.checkCancellation()
@@ -45,32 +52,28 @@ final class GarmentCaptureViewModel {
                 dominantColorName = result.dominantColorName
                 hasTransparentBackground = true
                 errorMessage = nil
-                if garmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    garmentName = "New garment"
-                }
             } catch is CancellationError {
                 return
             } catch {
+                // Important: processing failure is non-fatal. The original image
+                // remains available and save() deliberately persists it as fallback.
                 processedImage = nil
                 hasTransparentBackground = false
-
                 if let color = processor.dominantColor(in: image) {
                     dominantColorHex = color.hex
                     dominantColorName = color.name
                 }
-
-                errorMessage = """
-                Background removal failed: \(error.localizedDescription)
-                You can still save the original photo, or retake it against a plain background.
-                """
+                errorMessage = "Couldn't remove the background: \(error.localizedDescription) You can still save the original photo."
             }
         }
     }
 
     func retake() {
         processingTask?.cancel()
+        processingTask = nil
         capturedImage = nil
         processedImage = nil
+        hasTransparentBackground = false
         errorMessage = nil
         isProcessing = false
         didSave = false
@@ -103,9 +106,7 @@ final class GarmentCaptureViewModel {
             didSave = true
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
-            if let savedFilename {
-                GarmentImageStore.delete(filename: savedFilename)
-            }
+            if let savedFilename { GarmentImageStore.delete(filename: savedFilename) }
             errorMessage = "Couldn't save this garment. \(error.localizedDescription)"
         }
     }

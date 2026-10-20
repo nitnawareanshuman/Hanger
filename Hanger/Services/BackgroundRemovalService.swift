@@ -1,5 +1,6 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import ImageIO
 import UIKit
 import Vision
 
@@ -11,27 +12,35 @@ enum BackgroundRemovalError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidImage:
-            return "This photo couldn't be decoded."
+            return "This photo couldn't be decoded. Try another photo."
         case .noForeground:
-            return "No clear foreground subject was detected. Try a plain background and good lighting."
+            return "Vision couldn't isolate the garment. Try a plain, contrasting background and good lighting."
         case .outputCreationFailed:
-            return "The transparent cut-out couldn't be rendered."
+            return "The transparent cut-out couldn't be rendered. You can still save the original photo."
         }
     }
 }
 
-/// Uses the iOS 17 Vision foreground-instance mask API and trims transparent margins.
+/// Runs Vision foreground segmentation on an orientation-normalized image.
+/// Vision does not infer UIImage orientation from a cgImage, so normalize first.
 struct BackgroundRemovalService {
     private let context = CIContext(options: [.useSoftwareRenderer: false])
 
     func removeBackground(from image: UIImage) async throws -> UIImage {
-        guard let cgImage = image.cgImage else { throw BackgroundRemovalError.invalidImage }
+        guard let normalized = image.normalizedForVision(),
+              let cgImage = normalized.cgImage else {
+            throw BackgroundRemovalError.invalidImage
+        }
 
+        // The Vision request is synchronous. It executes inside this async service and
+        // is never called directly by the view body.
         let request = VNGenerateForegroundInstanceMaskRequest()
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        request.usesCPUOnly = false
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
         try handler.perform([request])
 
-        guard let observation = request.results?.first, !observation.allInstances.isEmpty else {
+        guard let observation = request.results?.first,
+              !observation.allInstances.isEmpty else {
             throw BackgroundRemovalError.noForeground
         }
 
@@ -64,7 +73,6 @@ struct BackgroundRemovalService {
             throw BackgroundRemovalError.noForeground
         }
 
-        // Preserve a little transparent padding rather than cutting into the garment.
         let margin = max(8, min(bounds.width, bounds.height) * 0.035)
         let crop = bounds.insetBy(dx: -margin, dy: -margin).intersection(source.extent)
         guard !crop.isNull, !crop.isEmpty,
@@ -72,7 +80,7 @@ struct BackgroundRemovalService {
             throw BackgroundRemovalError.outputCreationFailed
         }
 
-        return UIImage(cgImage: croppedCG, scale: image.scale, orientation: .up)
+        return UIImage(cgImage: croppedCG, scale: normalized.scale, orientation: .up)
     }
 
     private func alphaBounds(of image: CGImage) -> CGRect? {
@@ -105,12 +113,25 @@ struct BackgroundRemovalService {
         }
 
         guard maxX >= minX, maxY >= minY else { return nil }
-        // Convert the top-origin pixel scan to Core Graphics' image-coordinate rectangle.
         return CGRect(
             x: minX,
             y: height - maxY - 1,
             width: maxX - minX + 1,
             height: maxY - minY + 1
         )
+    }
+}
+
+private extension UIImage {
+    /// Draws the image into an upright bitmap so Vision sees the same orientation
+    /// shown to the user, whether it came from the camera or Photos.
+    func normalizedForVision() -> UIImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 }
