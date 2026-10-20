@@ -11,7 +11,21 @@ struct InsightsView: View {
     )
     private var garments: [Garment]
 
+    @Query(
+        filter: #Predicate<Garment> { $0.isArchived },
+        sort: \Garment.createdAt,
+        order: .reverse
+    )
+    private var archived: [Garment]
+
     @State private var viewModel = InsightsViewModel()
+
+    /// Hide suggestions for garments that were deleted or archived since the analysis ran.
+    private var visibleRecommendations: [WardrobeAIRecommendation] {
+        viewModel.recommendations.filter { item in
+            garments.contains { $0.id.uuidString == item.garmentId }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -20,38 +34,9 @@ struct InsightsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header
-
-                        if viewModel.isFallback {
-                            Label("Using offline recommendations", systemImage: "wifi.slash")
-                                .font(.footnote.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if !viewModel.summary.isEmpty {
-                            Text(viewModel.summary)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let error = viewModel.errorMessage, viewModel.isFallback {
-                            Text(error).font(.caption).foregroundStyle(.secondary)
-                        }
-
-                        if viewModel.isLoading {
-                            ProgressView("Reviewing your wardrobe…")
-                                .frame(maxWidth: .infinity)
-                                .padding(36)
-                        } else if viewModel.recommendations.isEmpty {
-                            ContentUnavailableView(
-                                "You're all caught up",
-                                systemImage: "checkmark.circle",
-                                description: Text("There are no outstanding suggestions right now.")
-                            )
-                        } else {
-                            ForEach(viewModel.recommendations) { item in
-                                recommendationCard(item)
-                            }
-                        }
+                        statusRow
+                        content
+                        archivedSection
                     }
                     .padding(20)
                 }
@@ -64,15 +49,103 @@ struct InsightsView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(viewModel.isLoading)
+                    .disabled(viewModel.isLoading || garments.isEmpty)
                     .accessibilityLabel("Refresh recommendations")
                 }
             }
             .task {
-                if viewModel.recommendations.isEmpty {
+                if viewModel.needsRefresh(for: garments) {
                     await viewModel.load(garments: garments)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if garments.isEmpty {
+            ContentUnavailableView(
+                "Nothing to review yet",
+                systemImage: "hanger",
+                description: Text("Add a few garments and Hanger will suggest what to keep, rotate or let go.")
+            )
+        } else if viewModel.isLoading {
+            ProgressView("Reviewing your wardrobe…")
+                .frame(maxWidth: .infinity)
+                .padding(36)
+        } else if visibleRecommendations.isEmpty {
+            ContentUnavailableView(
+                "You're all caught up",
+                systemImage: "checkmark.circle",
+                description: Text("There are no outstanding suggestions right now.")
+            )
+        } else {
+            ForEach(visibleRecommendations) { item in
+                RecommendationCardView(
+                    recommendation: item,
+                    garment: garments.first { $0.id.uuidString == item.garmentId },
+                    onDismiss: { withAnimation(.snappy) { viewModel.dismiss(item) } },
+                    onAccept: {
+                        withAnimation(.snappy) {
+                            viewModel.accept(item, garments: garments, context: modelContext)
+                        }
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        if viewModel.isFallback {
+            Label("Using offline recommendations", systemImage: "wifi.slash")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+        } else if !viewModel.recommendations.isEmpty {
+            Label("AI-powered suggestions", systemImage: "sparkles")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.wardrobeAccent)
+        }
+
+        if !viewModel.summary.isEmpty {
+            Text(viewModel.summary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+
+        if let error = viewModel.errorMessage {
+            Text(error).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var archivedSection: some View {
+        if !archived.isEmpty {
+            DisclosureGroup("Archived (\(archived.count))") {
+                VStack(spacing: 10) {
+                    ForEach(archived) { garment in
+                        HStack(spacing: 12) {
+                            GarmentImageView(garment: garment, padding: 3)
+                                .frame(width: 46, height: 50)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            Text(garment.name).font(.subheadline.weight(.medium))
+                            Spacer()
+                            Button("Restore") {
+                                withAnimation(.snappy) {
+                                    viewModel.restore(garment, context: modelContext)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+                .padding(.top, 10)
+            }
+            .tint(Color.wardrobeInk)
+            .padding(16)
+            .background(Color.wardrobeChip, in: RoundedRectangle(cornerRadius: 20))
         }
     }
 
@@ -90,63 +163,5 @@ struct InsightsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private func recommendationCard(_ item: WardrobeAIRecommendation) -> some View {
-        let garment = garments.first { $0.id.uuidString == item.garmentId }
-
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(hex: garment?.colorHex ?? "#8A8A8A").opacity(0.16))
-                    Image(systemName: garment?.category.illustrationSymbol ?? "tshirt")
-                        .font(.system(size: 27))
-                        .foregroundStyle(Color.wardrobeInk)
-                }
-                .frame(width: 66, height: 72)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(garment?.name ?? "Wardrobe item").font(.headline)
-                    Text(item.action.rawValue.capitalized)
-                        .font(.caption.bold())
-                        .foregroundStyle(Color.wardrobeAccent)
-                    Text(item.reason)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack {
-                Text("Confidence").font(.caption).foregroundStyle(.secondary)
-                ProgressView(value: item.confidence)
-                    .tint(Color.wardrobeAccent)
-                    .frame(maxWidth: 90)
-                Text("\(Int(item.confidence * 100))%")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                Button { viewModel.dismiss(item) } label: {
-                    Text("Dismiss").frame(maxWidth: .infinity).padding(.vertical, 12)
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    viewModel.accept(item, garments: garments, context: modelContext)
-                } label: {
-                    Text(item.action == .donate ? "Accept & archive" : "Accept")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.wardrobeInk)
-            }
-        }
-        .padding(16)
-        .background(Color.wardrobeChip, in: RoundedRectangle(cornerRadius: 20))
     }
 }

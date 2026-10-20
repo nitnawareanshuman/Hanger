@@ -3,7 +3,14 @@ import SwiftData
 
 struct ContentView: View {
     var body: some View {
-        InsightsView()
+        TabView {
+            WardrobeView()
+                .tabItem { Label("Wardrobe", systemImage: "hanger") }
+
+            InsightsView()
+                .tabItem { Label("Insights", systemImage: "sparkles") }
+        }
+        .tint(Color.wardrobeAccent)
     }
 }
 

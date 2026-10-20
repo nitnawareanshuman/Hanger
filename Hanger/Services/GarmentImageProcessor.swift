@@ -1,19 +1,22 @@
 import UIKit
 
-struct GarmentImageProcessingResult {
+nonisolated struct GarmentImageProcessingResult {
     let image: UIImage
     let dominantColorHex: String
     let dominantColorName: String
 }
 
-enum GarmentImageProcessingError: LocalizedError {
+nonisolated enum GarmentImageProcessingError: LocalizedError {
     case invalidImage
     var errorDescription: String? { "This image couldn't be processed." }
 }
 
-struct GarmentImageProcessor {
+/// Pure image work (Vision + colour analysis). Marked nonisolated/@concurrent because the
+/// project defaults to MainActor isolation, which would otherwise freeze the UI during segmentation.
+nonisolated struct GarmentImageProcessor {
     private let backgroundRemoval = BackgroundRemovalService()
 
+    @concurrent
     func process(_ image: UIImage) async throws -> GarmentImageProcessingResult {
         let cutout = try await backgroundRemoval.removeBackground(from: image)
         guard let color = ColorAnalysisService.dominantColor(in: cutout) else {

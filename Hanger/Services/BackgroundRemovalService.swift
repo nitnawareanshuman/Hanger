@@ -4,7 +4,7 @@ import ImageIO
 import UIKit
 import Vision
 
-enum BackgroundRemovalError: LocalizedError {
+nonisolated enum BackgroundRemovalError: LocalizedError {
     case invalidImage
     case noForeground
     case outputCreationFailed
@@ -23,17 +23,18 @@ enum BackgroundRemovalError: LocalizedError {
 
 /// Runs Vision foreground segmentation on an orientation-normalized image.
 /// Vision does not infer UIImage orientation from a cgImage, so normalize first.
-struct BackgroundRemovalService {
-    private let context = CIContext(options: [.useSoftwareRenderer: false])
-
+nonisolated struct BackgroundRemovalService {
+    /// @concurrent keeps the heavy Vision/CoreImage work off the main thread.
+    @concurrent
     func removeBackground(from image: UIImage) async throws -> UIImage {
-        guard let normalized = image.normalizedForVision(),
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        // Downscale first: segmenting and scanning a 12 MP bitmap is slow and memory hungry.
+        guard let normalized = image.normalizedForVision(maxDimension: 1600),
               let cgImage = normalized.cgImage else {
             throw BackgroundRemovalError.invalidImage
         }
 
-        // The Vision request is synchronous. It executes inside this async service and
-        // is never called directly by the view body.
+        // The Vision request is synchronous; this method runs on a background executor.
         let request = VNGenerateForegroundInstanceMaskRequest()
         request.usesCPUOnly = false
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
@@ -83,7 +84,7 @@ struct BackgroundRemovalService {
         return UIImage(cgImage: croppedCG, scale: normalized.scale, orientation: .up)
     }
 
-    private func alphaBounds(of image: CGImage) -> CGRect? {
+    private nonisolated func alphaBounds(of image: CGImage) -> CGRect? {
         let width = image.width
         let height = image.height
         let rowBytes = width * 4
@@ -125,13 +126,16 @@ struct BackgroundRemovalService {
 private extension UIImage {
     /// Draws the image into an upright bitmap so Vision sees the same orientation
     /// shown to the user, whether it came from the camera or Photos.
-    func normalizedForVision() -> UIImage? {
+    nonisolated func normalizedForVision(maxDimension: CGFloat) -> UIImage? {
         guard size.width > 0, size.height > 0 else { return nil }
+        let longest = max(size.width, size.height)
+        let scale = min(1, maxDimension / longest)
+        let target = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: target))
         }
     }
 }

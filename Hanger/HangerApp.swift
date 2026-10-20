@@ -1,11 +1,5 @@
-//
-//  HangerApp.swift
-//  Hanger
-//
-//  Created by Anshuman Nitnaware on 20/10/26.
-//
-
 import SwiftUI
+import SwiftData
 
 @main
 struct HangerApp: App {
@@ -13,5 +7,7 @@ struct HangerApp: App {
         WindowGroup {
             ContentView()
         }
+        // Creates the on-disk SwiftData store that @Query / modelContext rely on.
+        .modelContainer(for: Garment.self)
     }
 }

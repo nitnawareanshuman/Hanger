@@ -163,21 +163,6 @@ struct GarmentCaptureView: View {
     }
     
     
-    private var categoryOptions: some View {
-        ForEach(GarmentCategory.allCases) { category in
-            Text(category.title)
-                .tag(category)
-        }
-    }
-
-    private var seasonOptions: some View {
-        ForEach(Season.allCases) { season in
-            Text(season.title)
-                .tag(season)
-        }
-    }
-    
-    
     @ViewBuilder
     private var errorMessageView: some View {
         if let message = viewModel.errorMessage {
@@ -225,10 +210,38 @@ struct GarmentCaptureView: View {
     private var garmentForm: some View {
         VStack(alignment: .leading, spacing: 14) {
             garmentNameField
+            aiStatusView
             categoryPicker
             seasonPicker
             dominantColorView
             reviewActions
+        }
+    }
+
+    @ViewBuilder
+    private var aiStatusView: some View {
+        if viewModel.isCategorizing {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small).tint(.white)
+                Text("AI is naming and categorising…")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        } else if viewModel.aiFilled {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Auto-filled by AI. Tweak anything below.", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.wardrobeAccent)
+                if !viewModel.styleTags.isEmpty {
+                    Text(viewModel.styleTags.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+        } else if let notice = viewModel.aiNotice {
+            Text(notice)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
         }
     }
 

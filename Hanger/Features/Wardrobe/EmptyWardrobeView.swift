@@ -1,13 +1,9 @@
-//
-//  EmptyWardrobeView.swift
-//  Hanger
-//
-//  Created by Anshuman Nitnaware on 20/10/26.
-//
-
 import SwiftUI
 
 struct EmptyWardrobeView: View {
+    /// When provided, shows a "load sample wardrobe" shortcut (handy for demos and reviewers).
+    var onLoadSample: (() -> Void)? = nil
+
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "hanger")
@@ -17,27 +13,29 @@ struct EmptyWardrobeView: View {
             Text("Your wardrobe is waiting")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
 
-            Text("Capture or import your first garment to get started.")
+            Text("Tap the camera to capture your first garment.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Image(systemName: "camera.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
-                .background(
-                    Color.wardrobeAccent,
-                    in: RoundedRectangle(cornerRadius: 15)
-                )
+            if let onLoadSample {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onLoadSample()
+                } label: {
+                    Label("Load sample wardrobe", systemImage: "sparkles")
+                        .font(.system(size: 15, weight: .semibold))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(Color.wardrobeInk, in: Capsule())
+                        .foregroundStyle(Color.wardrobeBackground)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 36)
         .padding(.horizontal, 20)
-        .background(
-            Color.wardrobeChip,
-            in: RoundedRectangle(cornerRadius: 22)
-        )
+        .background(Color.wardrobeChip, in: RoundedRectangle(cornerRadius: 22))
     }
 }
-

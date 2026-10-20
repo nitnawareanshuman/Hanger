@@ -1,7 +1,7 @@
 import CoreGraphics
 import UIKit
 
-struct DominantColor: Equatable {
+nonisolated struct DominantColor: Equatable {
     let hex: String
     let name: String
     let red: UInt8
@@ -19,7 +19,7 @@ struct DominantColor: Equatable {
 }
 
 /// Quantizes visible pixels into RGB histogram buckets. Fully transparent pixels are ignored.
-enum ColorAnalysisService {
+nonisolated enum ColorAnalysisService {
     static func dominantColor(in image: UIImage) -> DominantColor? {
         guard let cgImage = image.cgImage else { return nil }
 
@@ -79,6 +79,17 @@ enum ColorAnalysisService {
             red: r,
             green: g,
             blue: b
+        )
+    }
+
+    /// Human colour name for a stored hex string (used when talking to the AI and for tags).
+    static func name(forHex hex: String) -> String {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard cleaned.count >= 6, let value = UInt32(cleaned.prefix(6), radix: 16) else { return "gray" }
+        return name(
+            forRed: UInt8((value >> 16) & 0xFF),
+            green: UInt8((value >> 8) & 0xFF),
+            blue: UInt8(value & 0xFF)
         )
     }
 

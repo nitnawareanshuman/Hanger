@@ -2,9 +2,15 @@ import SwiftUI
 import SwiftData
 
 struct WardrobeView: View {
-    @Query(sort: \Garment.createdAt, order: .reverse)
+    @Environment(\.modelContext) private var modelContext
+
+    @Query(
+        filter: #Predicate<Garment> { !$0.isArchived },
+        sort: \Garment.createdAt,
+        order: .reverse
+    )
     private var savedGarments: [Garment]
-    
+
     @State private var viewModel = WardrobeViewModel()
     @State private var selectedGarment: Garment?
     @State private var showCapture = false
@@ -53,17 +59,17 @@ struct WardrobeView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Add a garment")
                         .accessibilityHint("Opens garment capture")
-                        .sheet(isPresented: $showCapture) {
+                        .fullScreenCover(isPresented: $showCapture) {
                             GarmentCaptureView()
-                                .presentationDetents([.medium, .large])
-                                .presentationDragIndicator(.visible)
                         }
 
                     }
                     .padding(.horizontal, 20)
-                    if visibleGarments.isEmpty {
-                        EmptyWardrobeView()
-                            .padding(.horizontal, 20)
+                    if savedGarments.isEmpty {
+                        EmptyWardrobeView {
+                            WardrobeSampleData.seed(into: modelContext)
+                        }
+                        .padding(.horizontal, 20)
                     } else {
                         WardrobeCabinet {
                             VStack(spacing: 14) {
@@ -111,15 +117,13 @@ struct WardrobeView: View {
             }
         }
         .sheet(item: $selectedGarment) { garment in
-            GarmentDetailView(garment: garment) {
-                viewModel.markAsWorn(garment)
-            }
+            GarmentDetailView(
+                garment: garment,
+                onMarkWorn: { viewModel.markAsWorn(garment) },
+                onDelete: { delete(garment) }
+            )
             .background(Color.wardrobeBackground)
         }
-    }
-
-    private var selectedGarmentBinding: Binding<Garment?> {
-        Binding(get: { savedGarments.first { $0.id == viewModel.selectedGarmentID } }, set: { viewModel.selectedGarmentID = $0?.id })
     }
 
     private var header: some View {
@@ -166,7 +170,20 @@ struct WardrobeView: View {
     }
 
     private func select(_ garment: Garment) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         selectedGarment = garment
+    }
+
+    private func delete(_ garment: Garment) {
+        let filename = garment.imageFilename
+        selectedGarment = nil
+        // Let the detail sheet finish dismissing before the model is removed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            modelContext.delete(garment)
+            try? modelContext.save()
+            GarmentImageStore.delete(filename: filename)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
     }
 }
 
@@ -231,8 +248,19 @@ private struct HangingGarmentView: View {
             VStack(spacing: 0) {
                 HangerShape().stroke(Color.wardrobeMetal, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     .frame(width: 36, height: 24).padding(.top, 5)
-                GarmentIllustration(garment: garment).frame(width: 68, height: 118)
-                    .clipShape(GarmentBodyShape()).overlay(GarmentBodyShape().stroke(Color.white.opacity(0.3), lineWidth: 1)).padding(.top, -1)
+                Group {
+                    if let image = GarmentImageStore.load(filename: garment.imageFilename) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 72, height: 118)
+                            .shadow(color: .black.opacity(0.25), radius: 4, y: 3)
+                    } else {
+                        GarmentIllustration(garment: garment).frame(width: 68, height: 118)
+                            .clipShape(GarmentBodyShape()).overlay(GarmentBodyShape().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                    }
+                }
+                .padding(.top, -1)
             }
             .rotationEffect(.degrees(swings ? (index.isMultiple(of: 2) ? 1.8 : -1.5) : (index.isMultiple(of: 2) ? -1.8 : 1.5)), anchor: .top)
             .frame(maxHeight: .infinity, alignment: .top).contentShape(Rectangle())
@@ -269,7 +297,11 @@ private struct DrawerSection: View {
                                 VStack(spacing: 7) {
                                     ZStack {
                                         RoundedRectangle(cornerRadius: 13).fill(Color(hex: garment.colorHex).opacity(0.15))
-                                        Image(systemName: garment.category.illustrationSymbol).font(.system(size: 26, weight: .medium)).foregroundStyle(Color(hex: garment.colorHex))
+                                        if let image = GarmentImageStore.load(filename: garment.imageFilename) {
+                                            Image(uiImage: image).resizable().scaledToFit().padding(5)
+                                        } else {
+                                            Image(systemName: garment.category.illustrationSymbol).font(.system(size: 26, weight: .medium)).foregroundStyle(Color(hex: garment.colorHex))
+                                        }
                                     }.frame(width: 58, height: 52)
                                     Text(garment.name).font(.system(size: 10, weight: .medium)).lineLimit(1)
                                 }.frame(width: 72)
@@ -280,19 +312,6 @@ private struct DrawerSection: View {
             }
         }
         .padding(14).background(Color.wardrobeInterior, in: RoundedRectangle(cornerRadius: 18))
-    }
-}
-
-private struct CaptureComingSoonView: View {
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "camera.aperture").font(.system(size: 42)).foregroundStyle(Color.wardrobeAccent)
-            Text("Add to your wardrobe").font(.title2.bold())
-            Text("Connect your existing GarmentCaptureView here to use the live camera and image-processing flow.")
-                .multilineTextAlignment(.center).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 22)
-            Button("Got it") { dismiss() }.buttonStyle(.borderedProminent).tint(Color.wardrobeInk)
-        }.padding(24)
     }
 }
 

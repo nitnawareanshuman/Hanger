@@ -15,17 +15,20 @@ struct GarmentClassification: Codable {
     let season: AIWardrobeSeason
     let style_tags: [String]
 
+    /// Lenient on purpose: trims and clamps model output instead of rejecting a mostly-good answer.
     func validate() throws -> Self {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              name.count <= 80,
-              (1...5).contains(style_tags.count),
-              style_tags.allSatisfy({
-                  !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  && $0.count <= 30
-              }) else {
-            throw WardrobeAIError.invalidJSON
-        }
-        return self
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { throw WardrobeAIError.invalidJSON }
+        let cleanTags = style_tags
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { String($0.prefix(30)) }
+        return GarmentClassification(
+            category: category,
+            name: String(cleanName.prefix(80)),
+            season: season,
+            style_tags: Array(cleanTags.prefix(5))
+        )
     }
 
     var appCategory: GarmentCategory {
@@ -56,6 +59,7 @@ enum ClutterAction: String, Codable, CaseIterable {
 
 struct WardrobeAIItem: Codable, Identifiable {
     let id: String
+    let name: String
     let category: String
     let color: String
     let season: String
@@ -75,25 +79,29 @@ struct WardrobeRecommendationsResponse: Codable {
     let recommendations: [WardrobeAIRecommendation]
     let summary: String
 
+    /// Drops hallucinated IDs and duplicates, clamps confidence, and keeps whatever is valid.
     func validate(validIDs: Set<String>) throws -> Self {
-        guard recommendations.count <= 12, summary.count <= 500 else {
-            throw WardrobeAIError.invalidJSON
-        }
-
-        for item in recommendations {
+        var seen = Set<String>()
+        let cleaned: [WardrobeAIRecommendation] = recommendations.compactMap { item in
+            let reason = item.reason.trimmingCharacters(in: .whitespacesAndNewlines)
             guard validIDs.contains(item.garmentId),
-                  !item.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  item.reason.count <= 240,
+                  !reason.isEmpty,
                   item.confidence.isFinite,
-                  (0...1).contains(item.confidence) else {
-                throw WardrobeAIError.invalidJSON
-            }
+                  seen.insert(item.garmentId).inserted else { return nil }
+            return WardrobeAIRecommendation(
+                garmentId: item.garmentId,
+                action: item.action,
+                reason: String(reason.prefix(240)),
+                confidence: min(1, max(0, item.confidence))
+            )
         }
-
-        guard Set(recommendations.map(\.garmentId)).count == recommendations.count else {
+        guard !cleaned.isEmpty || recommendations.isEmpty else {
             throw WardrobeAIError.invalidJSON
         }
-        return self
+        return WardrobeRecommendationsResponse(
+            recommendations: Array(cleaned.prefix(12)),
+            summary: String(summary.prefix(500))
+        )
     }
 }
 
@@ -104,7 +112,7 @@ enum WardrobeAIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "OpenAI API key is missing. Configure OPENAI_API_KEY in your local xcconfig."
+            return "OpenAI API key is missing. Add Hanger/Secrets.plist (see README)."
         case .invalidJSON:
             return "The AI response failed schema validation."
         case .emptyResponse:
@@ -139,24 +147,25 @@ enum WardrobeAIPrompts {
 
     static let declutter = """
     You are a practical, non-judgmental wardrobe assistant. Do not shame the user.
-    Input is a JSON array with id, category, color, season, wearCount, daysSinceLastWorn.
+    Input is a JSON array with id, name, category, color (a colour name), season, wearCount, daysSinceLastWorn.
     Return exactly one JSON object with recommendations and summary.
     Each recommendation contains garmentId (exact input id), action (donate, keep, pair, rotate),
     reason (one concise evidence-based sentence), confidence (number 0 through 1).
     Never invent IDs. Recommend each ID at most once. Prefer keep when evidence is weak.
-    Suggest donate only when evidence is strong, such as very low wear and long inactivity.
+    Suggest donate only when evidence is strong, such as very low wear and long inactivity, or when an item is a near-duplicate
+    (same category, similar name and colour) of a piece that is worn much more; name the item it duplicates in the reason.
     Suggest pair when another category/color plausibly complements the item.
     Suggest rotate for seasonal items worth bringing back into use.
     Do not assume current weather or personal circumstances. Return at most 12 recommendations.
     JSON only, with no extra keys.
 
     Example input:
-    [{"id":"A1","category":"top","color":"white","season":"summer","wearCount":1,"daysSinceLastWorn":240}]
+    [{"id":"A1","name":"White crew tee","category":"top","color":"white","season":"summer","wearCount":1,"daysSinceLastWorn":240}]
     Example output:
     {"recommendations":[{"garmentId":"A1","action":"pair","reason":"A white top is versatile and may work with several bottoms in the wardrobe.","confidence":0.66}],"summary":"Try styling this versatile piece before deciding whether to let it go."}
 
     Example input:
-    [{"id":"B2","category":"outerwear","color":"navy","season":"winter","wearCount":0,"daysSinceLastWorn":500}]
+    [{"id":"B2","name":"Navy puffer jacket","category":"outerwear","color":"navy","season":"winter","wearCount":0,"daysSinceLastWorn":500}]
     Example output:
     {"recommendations":[{"garmentId":"B2","action":"donate","reason":"This item has very low wear and long inactivity; consider whether it still meets your needs.","confidence":0.72}],"summary":"Some long-unused items may deserve review, but the final decision is yours."}
     """
@@ -183,7 +192,8 @@ actor OpenAIWardrobeService {
 
     func categorize(image: UIImage) async throws -> GarmentClassification {
         guard let key = Self.apiKey else { throw WardrobeAIError.missingAPIKey }
-        guard let jpeg = image.jpegData(compressionQuality: 0.82) else {
+        // Never upload a full-resolution camera frame; 768 px is plenty to classify a garment.
+        guard let jpeg = image.resized(maxDimension: 768).jpegData(compressionQuality: 0.8) else {
             throw WardrobeAIError.invalidImage
         }
 
@@ -192,7 +202,7 @@ actor OpenAIWardrobeService {
             "role": "user",
             "content": [
                 ["type": "input_text", "text": "Classify this single garment."],
-                ["type": "input_image", "image_url": dataURL, "detail": "high"]
+                ["type": "input_image", "image_url": dataURL, "detail": "low"]
             ]
         ]]
 
@@ -235,12 +245,24 @@ actor OpenAIWardrobeService {
         }
     }
 
+    /// Lookup order: Xcode scheme environment variable, git-ignored Secrets.plist, Info.plist.
     private static var apiKey: String? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "OPENAI_API_KEY") as? String else {
-            return nil
+        let candidates: [String?] = [
+            ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
+            secretsPlistValue,
+            Bundle.main.object(forInfoDictionaryKey: "OPENAI_API_KEY") as? String
+        ]
+        for raw in candidates {
+            let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty, !value.contains("$("), !value.hasPrefix("YOUR_") { return value }
         }
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty || value.contains("$(") ? nil : value
+        return nil
+    }
+
+    private static var secretsPlistValue: String? {
+        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+              let dictionary = NSDictionary(contentsOf: url) as? [String: Any] else { return nil }
+        return dictionary["OPENAI_API_KEY"] as? String
     }
 
     private func send(

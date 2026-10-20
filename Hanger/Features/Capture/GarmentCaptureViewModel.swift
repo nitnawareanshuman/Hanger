@@ -6,6 +6,8 @@ import UIKit
 @MainActor
 @Observable
 final class GarmentCaptureViewModel {
+    private static let placeholderName = "New garment"
+
     var capturedImage: UIImage?
     var processedImage: UIImage?
     var dominantColorHex = "#8A8A8A"
@@ -13,7 +15,11 @@ final class GarmentCaptureViewModel {
     var garmentName = ""
     var selectedCategory: GarmentCategory = .tops
     var selectedSeason: Season = .allSeason
+    var styleTags: [String] = []
     var isProcessing = false
+    var isCategorizing = false
+    var aiFilled = false
+    var aiNotice: String?
     var errorMessage: String?
     var didSave = false
     var hasTransparentBackground = false
@@ -22,6 +28,8 @@ final class GarmentCaptureViewModel {
 
     private let processor = GarmentImageProcessor()
     private var processingTask: Task<Void, Never>?
+    private var aiTask: Task<Void, Never>?
+    private var aiToken = UUID()
 
     func handleCapture(_ image: UIImage) {
         processingTask?.cancel()
@@ -31,16 +39,19 @@ final class GarmentCaptureViewModel {
         errorMessage = nil
         didSave = false
         isProcessing = true
+        garmentName = Self.placeholderName
+        styleTags = []
+        aiFilled = false
+        aiNotice = nil
 
-        // Calculate a useful color immediately, so the review screen is never left
-        // showing a stale default while segmentation is in progress.
+        // Quick colour estimate so the review screen never shows a stale default
+        // while segmentation runs in the background.
         if let color = processor.dominantColor(in: image) {
             dominantColorHex = color.hex
             dominantColorName = color.name
         }
-        if garmentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            garmentName = "New garment"
-        }
+
+        startCategorization(for: image)
 
         processingTask = Task {
             defer { isProcessing = false }
@@ -55,14 +66,9 @@ final class GarmentCaptureViewModel {
             } catch is CancellationError {
                 return
             } catch {
-                // Important: processing failure is non-fatal. The original image
-                // remains available and save() deliberately persists it as fallback.
+                // Non-fatal: the original photo is still saved as a fallback.
                 processedImage = nil
                 hasTransparentBackground = false
-                if let color = processor.dominantColor(in: image) {
-                    dominantColorHex = color.hex
-                    dominantColorName = color.name
-                }
                 errorMessage = "Couldn't remove the background: \(error.localizedDescription) You can still save the original photo."
             }
         }
@@ -71,12 +77,22 @@ final class GarmentCaptureViewModel {
     func retake() {
         processingTask?.cancel()
         processingTask = nil
+        aiTask?.cancel()
+        aiTask = nil
+        aiToken = UUID()
         capturedImage = nil
         processedImage = nil
         hasTransparentBackground = false
         errorMessage = nil
+        aiNotice = nil
+        aiFilled = false
         isProcessing = false
+        isCategorizing = false
         didSave = false
+        garmentName = ""
+        styleTags = []
+        selectedCategory = .tops
+        selectedSeason = .allSeason
     }
 
     func save(context: ModelContext) {
@@ -92,17 +108,25 @@ final class GarmentCaptureViewModel {
             let filename = try GarmentImageStore.save(image)
             savedFilename = filename
             let title = garmentName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var tags = [dominantColorName]
+            for tag in styleTags where !tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                tags.append(tag)
+            }
+
             let garment = Garment(
-                name: title.isEmpty ? "New garment" : title,
+                name: title.isEmpty ? Self.placeholderName : title,
                 category: selectedCategory,
                 colorHex: dominantColorHex,
                 season: selectedSeason,
                 imageFilename: filename,
                 wearCount: 0,
-                tags: [dominantColorName]
+                tags: tags
             )
             context.insert(garment)
             try context.save()
+            aiTask?.cancel()
+            aiToken = UUID()
             didSave = true
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
@@ -110,16 +134,44 @@ final class GarmentCaptureViewModel {
             errorMessage = "Couldn't save this garment. \(error.localizedDescription)"
         }
     }
-    
-    func autoCategorize(_ image: UIImage) async {
-        do {
-            let result = try await OpenAIWardrobeService.shared.categorize(image: image)
-            garmentName = result.name
-            selectedCategory = result.appCategory
-            selectedSeason = result.appSeason
-            // If you add a styleTags property to the view model, assign result.style_tags here.
-        } catch {
-            errorMessage = "Auto-categorization unavailable. You can edit this garment manually."
+
+    // MARK: - AI auto-categorisation
+
+    /// Runs in parallel with background removal. Uses the original (downscaled) photo,
+    /// because a transparent PNG would be flattened to black when encoded as JPEG.
+    private func startCategorization(for image: UIImage) {
+        aiTask?.cancel()
+        let token = UUID()
+        aiToken = token
+        isCategorizing = true
+
+        aiTask = Task { [weak self] in
+            let small = image.resized(maxDimension: 768)
+            do {
+                let result = try await OpenAIWardrobeService.shared.categorize(image: small)
+                guard let self, self.aiToken == token else { return }
+                self.apply(result)
+            } catch {
+                guard let self, self.aiToken == token else { return }
+                if error is CancellationError { return }
+                if let aiError = error as? WardrobeAIError, case .missingAPIKey = aiError {
+                    self.aiNotice = "AI auto-fill is off (no API key). Choose the details yourself."
+                } else {
+                    self.aiNotice = "AI auto-fill unavailable. You can edit the details manually."
+                }
+            }
+            if let self, self.aiToken == token { self.isCategorizing = false }
         }
+    }
+
+    private func apply(_ result: GarmentClassification) {
+        let current = garmentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty || current == Self.placeholderName {
+            garmentName = result.name
+        }
+        selectedCategory = result.appCategory
+        selectedSeason = result.appSeason
+        styleTags = result.style_tags
+        aiFilled = true
     }
 }
